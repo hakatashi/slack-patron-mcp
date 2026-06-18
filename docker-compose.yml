@@ -1,0 +1,10 @@
+services:
+  slack-patron-mcp:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:29112:29112"
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: "29112"
