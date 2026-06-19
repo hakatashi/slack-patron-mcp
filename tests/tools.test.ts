@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerListChannels } from "../src/tools/list_channels";
 import { registerGetChannelMessages } from "../src/tools/get_channel_messages";
 import { registerGetThreadReplies } from "../src/tools/get_thread_replies";
+import { registerPostMessage } from "../src/tools/post_message";
 
 const mockFetch = global.fetch as jest.MockedFunction<typeof fetch>;
 
@@ -12,11 +13,12 @@ beforeEach(() => {
   process.env.SLACK_PATRON_BASE_URL = "https://test.example.com";
 });
 
-async function createTestClient(token: string): Promise<Client> {
+async function createTestClient(token: string, slackToken = "slack-tok"): Promise<Client> {
   const server = new McpServer({ name: "test", version: "0.0.1" });
   registerListChannels(server, token);
   registerGetChannelMessages(server, token);
   registerGetThreadReplies(server, token);
+  registerPostMessage(server, slackToken);
 
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
@@ -208,5 +210,108 @@ describe("get_thread_replies", () => {
     const text = (result as any).content[0].text as string;
     expect(text).toContain("403");
     expect(text).not.toContain("secret-upstream-token");
+  });
+});
+
+describe("post_message", () => {
+  const SANDBOX_ID = "C7AAX50QY";
+
+  it("posts to #sandbox and returns ts on success", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, ts: "1700000001.000000" }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok", "xoxp-secret");
+    const result = await client.callTool({
+      name: "post_message",
+      arguments: { message: "Hello" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("1700000001.000000");
+    expect(text).toContain("#sandbox");
+  });
+
+  it("always posts to the sandbox channel ID", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, ts: "1700000002.000000" }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok", "xoxp-secret");
+    await client.callTool({ name: "post_message", arguments: { message: "test" } });
+
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("chat.postMessage");
+    expect(init.body as string).toContain(`channel=${SANDBOX_ID}`);
+  });
+
+  it("appends attribution context block to the message", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, ts: "1700000003.000000" }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok", "xoxp-secret");
+    await client.callTool({ name: "post_message", arguments: { message: "Hello" } });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const params = new URLSearchParams(init.body as string);
+    expect(params.get("text")).toBe("Hello");
+    const blocks = JSON.parse(params.get("blocks") ?? "[]");
+    expect(blocks[blocks.length - 1]).toMatchObject({
+      type: "context",
+      elements: [{ type: "plain_text", text: "このメッセージはClaudeによって投稿されました" }],
+    });
+  });
+
+  it("sends as_user=true", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, ts: "1700000004.000000" }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok", "xoxp-secret");
+    await client.callTool({ name: "post_message", arguments: { message: "test" } });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(init.body as string).toContain("as_user=true");
+  });
+
+  it("returns error when Slack API responds with ok=false", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: false, error: "channel_not_found" }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok", "xoxp-secret");
+    const result = await client.callTool({
+      name: "post_message",
+      arguments: { message: "test" },
+    });
+
+    expect(result.isError).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("channel_not_found");
+  });
+
+  it("returns error on HTTP 403 without exposing token", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 403 } as Response);
+
+    const client = await createTestClient("tok", "xoxp-super-secret");
+    const result = await client.callTool({
+      name: "post_message",
+      arguments: { message: "test" },
+    });
+
+    expect(result.isError).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("403");
+    expect(text).not.toContain("xoxp-super-secret");
   });
 });

@@ -6,6 +6,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { registerListChannels } from "./tools/list_channels.js";
 import { registerGetChannelMessages } from "./tools/get_channel_messages.js";
 import { registerGetThreadReplies } from "./tools/get_thread_replies.js";
+import { registerPostMessage } from "./tools/post_message.js";
 
 // Hash both values to a fixed-length buffer before constant-time compare,
 // since timingSafeEqual requires equal-length buffers.
@@ -32,7 +33,7 @@ function bearerAuthMiddleware(req: Request, res: Response, next: NextFunction): 
   next();
 }
 
-function createMcpServer(upstreamToken: string): McpServer {
+function createMcpServer(upstreamToken: string, slackToken: string): McpServer {
   const server = new McpServer({
     name: "slack-patron-mcp",
     version: "1.0.0",
@@ -40,6 +41,7 @@ function createMcpServer(upstreamToken: string): McpServer {
   registerListChannels(server, upstreamToken);
   registerGetChannelMessages(server, upstreamToken);
   registerGetThreadReplies(server, upstreamToken);
+  registerPostMessage(server, slackToken);
   return server;
 }
 
@@ -58,7 +60,8 @@ export function createApp(): Express {
     bearerAuthMiddleware,
     async (req: Request, res: Response): Promise<void> => {
       const upstreamToken = process.env.SLACK_PATRON_API_TOKEN ?? "";
-      const server = createMcpServer(upstreamToken);
+      const slackToken = process.env.SLACK_TOKEN ?? "";
+      const server = createMcpServer(upstreamToken, slackToken);
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined, // stateless: no session tracking
       });

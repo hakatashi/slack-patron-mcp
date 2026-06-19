@@ -42,3 +42,25 @@ export async function upstreamPost(
   }
   return res.json();
 }
+
+const SLACK_API_BASE = "https://slack.com/api";
+
+export async function slackPost(
+  method: string,
+  token: string,
+  body: Record<string, string>
+): Promise<unknown> {
+  const res = await fetch(`${SLACK_API_BASE}/${method}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams(body).toString(),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) {
+    throw new UpstreamError(res.status, `Slack API ${method} returned ${res.status}`);
+  }
+  return res.json();
+}
