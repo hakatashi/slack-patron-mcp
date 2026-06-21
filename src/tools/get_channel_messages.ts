@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v3";
 import { upstreamGet, upstreamPost, UpstreamError } from "../upstream.js";
+import { resolveUsername } from "../users.js";
 
 interface ChannelEntry {
   id: string;
@@ -88,7 +89,7 @@ export function registerGetChannelMessages(server: McpServer, token: string): vo
 
         const lines = messages.map((m) => {
           const ts = new Date(parseFloat(m.ts) * 1000).toISOString();
-          const author = m.username ?? m.user ?? m.bot_id ?? "unknown";
+          const author = m.username ?? (m.user ? resolveUsername(m.user) : null) ?? m.bot_id ?? "unknown";
           const text = (m.text ?? "").replace(/\n/g, " ");
           const threadNote =
             m.reply_count && m.reply_count > 0

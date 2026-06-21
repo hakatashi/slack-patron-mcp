@@ -1,15 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v3";
 import { upstreamPost, UpstreamError } from "../upstream.js";
-import { resolveUsername } from "../users.js";
-
-interface SlackMessage {
-  ts: string;
-  user?: string;
-  username?: string;
-  bot_id?: string;
-  text?: string;
-}
 
 const inputSchema = z.object({
   channel: z.string().describe("Channel ID containing the thread (e.g. C01234567)"),
@@ -22,12 +13,12 @@ const inputSchema = z.object({
   cursor: z.string().optional().describe("Pagination cursor from a previous response."),
 });
 
-export function registerGetThreadReplies(server: McpServer, token: string): void {
+export function registerGetThreadRepliesRaw(server: McpServer, token: string): void {
   server.registerTool(
-    "get_thread_replies",
+    "get_thread_replies_raw",
     {
       description:
-        "Retrieve all replies in a Slack message thread. The first message in the response is the parent message, followed by replies.",
+        "Retrieve raw structured JSON for all replies in a Slack message thread. Returns the full Slack API response including blocks, attachments, reactions, files, and all metadata. Use this when you need detailed message structure beyond the formatted text summary.",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       inputSchema: inputSchema as any,
     },
@@ -42,33 +33,11 @@ export function registerGetThreadReplies(server: McpServer, token: string): void
         };
         if (cursor) body.cursor = cursor;
 
-        const data = (await upstreamPost("/api/conversations.replies", token, body)) as {
-          ok?: boolean;
-          messages?: SlackMessage[];
-          has_more?: boolean;
-          response_metadata?: { next_cursor?: string };
+        const data = await upstreamPost("/api/conversations.replies", token, body);
+
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
         };
-
-        const messages = data.messages ?? [];
-        const nextCursor = data.response_metadata?.next_cursor;
-
-        if (messages.length === 0) {
-          return { content: [{ type: "text" as const, text: "No replies found." }] };
-        }
-
-        const lines = messages.map((m, i) => {
-          const ts = new Date(parseFloat(m.ts) * 1000).toISOString();
-          const author = m.username ?? (m.user ? resolveUsername(m.user) : null) ?? m.bot_id ?? "unknown";
-          const text = (m.text ?? "").replace(/\n/g, " ");
-          const label = i === 0 ? "[parent]" : "[reply]";
-          return `${label} [${ts}] <${author}>: ${text}`;
-        });
-
-        if (nextCursor) {
-          lines.push(`\n(More replies available. Use cursor="${nextCursor}" to get the next page.)`);
-        }
-
-        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
       } catch (err) {
         if (err instanceof UpstreamError) {
           return {

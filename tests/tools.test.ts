@@ -3,21 +3,28 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerListChannels } from "../src/tools/list_channels";
 import { registerGetChannelMessages } from "../src/tools/get_channel_messages";
+import { registerGetChannelMessagesRaw } from "../src/tools/get_channel_messages_raw";
 import { registerGetThreadReplies } from "../src/tools/get_thread_replies";
+import { registerGetThreadRepliesRaw } from "../src/tools/get_thread_replies_raw";
 import { registerPostMessage } from "../src/tools/post_message";
+import { _resetUsersCache } from "../src/users";
 
 const mockFetch = global.fetch as jest.MockedFunction<typeof fetch>;
 
 beforeEach(() => {
   mockFetch.mockReset();
   process.env.SLACK_PATRON_BASE_URL = "https://test.example.com";
+  delete process.env.USERS_JSON_PATH;
+  _resetUsersCache();
 });
 
 async function createTestClient(token: string, slackToken = "slack-tok"): Promise<Client> {
   const server = new McpServer({ name: "test", version: "0.0.1" });
   registerListChannels(server, token);
   registerGetChannelMessages(server, token);
+  registerGetChannelMessagesRaw(server, token);
   registerGetThreadReplies(server, token);
+  registerGetThreadRepliesRaw(server, token);
   registerPostMessage(server, slackToken);
 
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -313,5 +320,171 @@ describe("post_message", () => {
     const text = (result as any).content[0].text as string;
     expect(text).toContain("403");
     expect(text).not.toContain("xoxp-super-secret");
+  });
+});
+
+describe("nickname resolution in get_channel_messages", () => {
+  it("resolves user ID to nickname from USERS_JSON_PATH", async () => {
+    const { writeFileSync, unlinkSync } = await import("fs");
+    const tmpPath = "/tmp/test-users.json";
+    writeFileSync(tmpPath, JSON.stringify({ U001: "はかたし" }));
+    process.env.USERS_JSON_PATH = tmpPath;
+    _resetUsersCache();
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        messages: [{ ts: "1700000000.000000", user: "U001", text: "Hello" }],
+        has_more: false,
+      }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "get_channel_messages",
+      arguments: { channel: "C001" },
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("<はかたし>: Hello");
+    unlinkSync(tmpPath);
+  });
+
+  it("falls back to user ID when not found in users.json", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        messages: [{ ts: "1700000000.000000", user: "UUNKNOWN", text: "Hi" }],
+        has_more: false,
+      }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "get_channel_messages",
+      arguments: { channel: "C001" },
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("<UUNKNOWN>: Hi");
+  });
+});
+
+describe("get_channel_messages_raw", () => {
+  it("returns raw JSON response from upstream", async () => {
+    const rawResponse = {
+      ok: true,
+      messages: [
+        {
+          ts: "1700000000.000000",
+          user: "U001",
+          text: "Hello",
+          blocks: [{ type: "section", text: { type: "mrkdwn", text: "Hello" } }],
+        },
+      ],
+      has_more: false,
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => rawResponse,
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "get_channel_messages_raw",
+      arguments: { channel: "C001" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    const parsed = JSON.parse(text);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.messages[0].blocks).toBeDefined();
+  });
+
+  it("resolves channel name to ID before fetching raw data", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ C001: { id: "C001", name: "general" } }),
+    } as unknown as Response);
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, messages: [], has_more: false }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    await client.callTool({
+      name: "get_channel_messages_raw",
+      arguments: { channel: "general" },
+    });
+
+    const [, postCall] = mockFetch.mock.calls as [string, RequestInit][];
+    expect(postCall[1].body as string).toContain("channel=C001");
+  });
+
+  it("returns error on upstream failure", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500 } as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "get_channel_messages_raw",
+      arguments: { channel: "C001" },
+    });
+
+    expect(result.isError).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("500");
+  });
+});
+
+describe("get_thread_replies_raw", () => {
+  it("returns raw JSON response from upstream", async () => {
+    const rawResponse = {
+      ok: true,
+      messages: [
+        { ts: "1700000000.000000", user: "U001", text: "Parent", reactions: [{ name: "thumbsup", count: 2 }] },
+        { ts: "1700000001.000000", user: "U002", text: "Reply" },
+      ],
+      has_more: false,
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => rawResponse,
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "get_thread_replies_raw",
+      arguments: { channel: "C001", thread_ts: "1700000000.000000" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    const parsed = JSON.parse(text);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.messages[0].reactions).toBeDefined();
+  });
+
+  it("returns error on upstream 403 without exposing token", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 403 } as Response);
+
+    const client = await createTestClient("secret-token");
+    const result = await client.callTool({
+      name: "get_thread_replies_raw",
+      arguments: { channel: "C001", thread_ts: "1700000000.000000" },
+    });
+
+    expect(result.isError).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("403");
+    expect(text).not.toContain("secret-token");
   });
 });

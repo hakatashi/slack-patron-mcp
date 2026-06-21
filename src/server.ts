@@ -5,7 +5,9 @@ import { timingSafeEqual, createHash } from "crypto";
 import type { Express, Request, Response, NextFunction } from "express";
 import { registerListChannels } from "./tools/list_channels.js";
 import { registerGetChannelMessages } from "./tools/get_channel_messages.js";
+import { registerGetChannelMessagesRaw } from "./tools/get_channel_messages_raw.js";
 import { registerGetThreadReplies } from "./tools/get_thread_replies.js";
+import { registerGetThreadRepliesRaw } from "./tools/get_thread_replies_raw.js";
 import { registerPostMessage } from "./tools/post_message.js";
 
 // Hash both values to a fixed-length buffer before constant-time compare,
@@ -40,7 +42,9 @@ function createMcpServer(upstreamToken: string, slackToken: string): McpServer {
   });
   registerListChannels(server, upstreamToken);
   registerGetChannelMessages(server, upstreamToken);
+  registerGetChannelMessagesRaw(server, upstreamToken);
   registerGetThreadReplies(server, upstreamToken);
+  registerGetThreadRepliesRaw(server, upstreamToken);
   registerPostMessage(server, slackToken);
   return server;
 }

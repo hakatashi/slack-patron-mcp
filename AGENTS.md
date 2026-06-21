@@ -11,10 +11,13 @@ src/
   index.ts          – HTTP server entry point (reads PORT from env)
   server.ts         – Express app factory: auth middleware + MCP handler per request (stateless)
   upstream.ts       – HTTP client for slack-patron: upstreamGet / upstreamPost + UpstreamError
+  users.ts          – Nickname resolver: loads USERS_JSON_PATH and maps user IDs → display names
   tools/
-    list_channels.ts         – GET /channels.json → formatted #name (ID) list
-    get_channel_messages.ts  – POST /api/conversations.history (resolves channel name→ID)
-    get_thread_replies.ts    – POST /api/conversations.replies
+    list_channels.ts              – GET /channels.json → formatted #name (ID) list
+    get_channel_messages.ts       – POST /api/conversations.history (resolves channel name→ID, shows nicknames)
+    get_channel_messages_raw.ts   – same as above but returns full raw JSON response
+    get_thread_replies.ts         – POST /api/conversations.replies (shows nicknames)
+    get_thread_replies_raw.ts     – same as above but returns full raw JSON response
 ```
 
 ## Key Invariants
@@ -31,6 +34,7 @@ src/
 | `MCP_SERVER_AUTH_TOKEN` | `src/server.ts` | Bearer token for authenticating MCP clients |
 | `SLACK_PATRON_API_TOKEN` | `src/server.ts` → tools | Bearer token for the slack-patron upstream API |
 | `SLACK_PATRON_BASE_URL` | `src/upstream.ts` | Base URL of the slack-patron upstream API (no trailing slash) |
+| `USERS_JSON_PATH` | `src/users.ts` | Path to a JSON file mapping Slack user IDs to display names (e.g. `/path/to/users.json`). If unset, user IDs are shown as-is. |
 | `PORT` | `src/index.ts` | HTTP listen port (default: 29112) |
 
 ## Build & Test
