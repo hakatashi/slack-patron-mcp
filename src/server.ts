@@ -9,6 +9,8 @@ import { registerGetChannelMessagesRaw } from "./tools/get_channel_messages_raw.
 import { registerGetThreadReplies } from "./tools/get_thread_replies.js";
 import { registerGetThreadRepliesRaw } from "./tools/get_thread_replies_raw.js";
 import { registerPostMessage } from "./tools/post_message.js";
+import { registerSearchMessages } from "./tools/search_messages.js";
+import { registerDownloadFile } from "./tools/download_file.js";
 
 // Hash both values to a fixed-length buffer before constant-time compare,
 // since timingSafeEqual requires equal-length buffers.
@@ -46,6 +48,8 @@ function createMcpServer(upstreamToken: string, slackToken: string): McpServer {
   registerGetThreadReplies(server, upstreamToken);
   registerGetThreadRepliesRaw(server, upstreamToken);
   registerPostMessage(server, slackToken);
+  registerSearchMessages(server, upstreamToken);
+  registerDownloadFile(server, slackToken);
   return server;
 }
 
