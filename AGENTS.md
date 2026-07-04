@@ -11,6 +11,7 @@ src/
   index.ts          – HTTP server entry point (reads PORT from env)
   server.ts         – Express app factory: auth middleware + MCP handler per request (stateless)
   upstream.ts       – HTTP client for slack-patron: upstreamGet / upstreamPost + UpstreamError
+                      also slackPost / slackGet / slackDownload for direct Slack API calls
   users.ts          – Nickname resolver: loads USERS_JSON_PATH and maps user IDs → display names
   tools/
     list_channels.ts              – GET /channels.json → formatted #name (ID) list
@@ -18,6 +19,8 @@ src/
     get_channel_messages_raw.ts   – same as above but returns full raw JSON response
     get_thread_replies.ts         – POST /api/conversations.replies (shows nicknames)
     get_thread_replies_raw.ts     – same as above but returns full raw JSON response
+    search_messages.ts            – POST /api/search.messages (ElasticSearch query string query, via slack-patron)
+    download_file.ts              – Slack files.info + private URL download (via Slack API directly)
 ```
 
 ## Key Invariants
@@ -72,5 +75,13 @@ Base URL: set via `SLACK_PATRON_BASE_URL` environment variable
 | GET | `/users.json` | — | Returns hash `{ userId: { id, name, ... } }` |
 | POST | `/api/conversations.history` | `channel`, `oldest`, `latest`, `inclusive`, `cursor`, `limit` (≤1000) | Slack-format response |
 | POST | `/api/conversations.replies` | `channel`, `ts`, `oldest`, `latest`, `inclusive`, `cursor`, `limit` | Slack-format response |
+| POST | `/api/search.messages` | `query` (ElasticSearch query string), `limit`, `cursor` | Returns `{ ok, messages: { matches, pagination: { next_cursor } } }` |
 
 All requests require `Authorization: Bearer <SLACK_PATRON_API_TOKEN>` and form-encoded body (`Content-Type: application/x-www-form-urlencoded`).
+
+## Direct Slack API (used by download_file)
+
+`download_file` calls the Slack API directly using `SLACK_TOKEN`:
+
+1. `GET https://slack.com/api/files.info?file=<file_id>` — returns file metadata including `url_private_download`
+2. `GET <url_private_download>` — downloads the actual file content (binary stream)

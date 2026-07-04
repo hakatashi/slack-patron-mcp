@@ -3,12 +3,27 @@ import { z } from "zod/v3";
 import { upstreamPost, UpstreamError } from "../upstream.js";
 import { resolveUsername } from "../users.js";
 
+interface SlackFile {
+  id: string;
+  mimetype?: string;
+  url_private?: string;
+}
+
 interface SlackMessage {
   ts: string;
   user?: string;
   username?: string;
   bot_id?: string;
   text?: string;
+  files?: SlackFile[];
+}
+
+function formatAttachmentNote(files?: SlackFile[]): string {
+  if (!files || files.length === 0) return "";
+  const allImages = files.every((f) => (f.mimetype ?? "").startsWith("image/"));
+  const label = allImages ? "添付画像あり" : "添付ファイルあり";
+  const parts = files.map((f) => `${f.url_private ?? "(URL不明)"} / fileId:${f.id}`);
+  return ` [${label}(${files.length}件): ${parts.join(", ")}]`;
 }
 
 const inputSchema = z.object({
@@ -27,7 +42,8 @@ export function registerGetThreadReplies(server: McpServer, token: string): void
     "get_thread_replies",
     {
       description:
-        "Retrieve all replies in a Slack message thread. The first message in the response is the parent message, followed by replies.",
+        "Retrieve all replies in a Slack message thread. The first message in the response is the parent message, followed by replies. " +
+        "If a message has attachments, a note is appended to the end of the line (e.g. [添付画像あり(2件): https://.../a.jpg / fileId:F01234567, ...]).",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       inputSchema: inputSchema as any,
     },
@@ -61,7 +77,8 @@ export function registerGetThreadReplies(server: McpServer, token: string): void
           const author = m.username ?? (m.user ? resolveUsername(m.user) : null) ?? m.bot_id ?? "unknown";
           const text = (m.text ?? "").replace(/\n/g, " ");
           const label = i === 0 ? "[parent]" : "[reply]";
-          return `${label} [${ts}] <${author}>: ${text}`;
+          const attachmentNote = formatAttachmentNote(m.files);
+          return `${label} [${ts}] <${author}>: ${text}${attachmentNote}`;
         });
 
         if (nextCursor) {

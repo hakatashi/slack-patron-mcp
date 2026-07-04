@@ -13,8 +13,12 @@ slack-patron (https://github.com/tsg-ut/slack-patron) のSlackメッセージ履
 | ツール名 | 説明 |
 |---------|------|
 | `list_channels` | ワークスペースの全チャンネル一覧を取得 |
-| `get_channel_messages` | チャンネルのメッセージ履歴を取得 (時刻範囲・ページネーション対応) |
-| `get_thread_replies` | スレッドの返信一覧を取得 |
+| `get_channel_messages` | チャンネルのメッセージ履歴を取得 (時刻範囲・ページネーション対応、添付ファイルは末尾に注記) |
+| `get_channel_messages_raw` | チャンネルのメッセージ履歴を生JSON形式で取得 |
+| `get_thread_replies` | スレッドの返信一覧を取得 (添付ファイルは末尾に注記) |
+| `get_thread_replies_raw` | スレッドの返信一覧を生JSON形式で取得 |
+| `search_messages` | ElasticSearchクエリ文字列構文でメッセージを検索 |
+| `download_file` | SlackにアップロードされたファイルをダウンロードしてコンテンツをSlack API経由で取得 |
 
 ### `get_channel_messages` パラメータ
 
@@ -35,6 +39,28 @@ slack-patron (https://github.com/tsg-ut/slack-patron) のSlackメッセージ履
 | `limit` | number | - | 取得件数 (1-200, デフォルト50) |
 | `cursor` | string | - | ページネーションカーソル |
 
+`get_channel_messages` / `get_thread_replies` は、メッセージに添付ファイルがある場合、行の末尾に注記を追加します。全ファイルが画像の場合は `添付画像あり`、それ以外を含む場合は `添付ファイルあり` と表示されます。
+
+```
+[2023-11-14T22:13:20.000Z] <U001>: look at this [添付画像あり(2件): https://example.com/example.jpg / fileId:F01234567, https://example.com/example2.png / fileId:F09876543]
+```
+
+### `search_messages` パラメータ
+
+| パラメータ | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `query` | string | ✓ | ElasticSearchクエリ文字列。例: `プログラム AND (channel:C7AAX50QY) AND (user:U04G7TL4P) AND (ts:[* TO 1780239600])` |
+| `limit` | number | - | 取得件数 (1-100, デフォルト20) |
+| `cursor` | string | - | ページネーションカーソル (前回レスポンスから取得) |
+
+### `download_file` パラメータ
+
+| パラメータ | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `file_id` | string | ✓ | Slack ファイルID (例: F1234567890) |
+
+テキストファイル (text/*, application/json 等) はプレーンテキストとして返します。バイナリファイルはBase64エンコードして返します。5 MB を超えるファイルはダウンロードせず、メタデータのみ返します。
+
 ## セットアップ
 
 ### 必要な環境変数
@@ -44,6 +70,8 @@ slack-patron (https://github.com/tsg-ut/slack-patron) のSlackメッセージ履
 | `MCP_SERVER_AUTH_TOKEN` | Claudeがこのサーバーに接続する際のBearerトークン |
 | `SLACK_PATRON_API_TOKEN` | slack-patronの上流APIへのBearerトークン |
 | `SLACK_PATRON_BASE_URL` | slack-patron上流APIのベースURL (末尾スラッシュなし) |
+| `SLACK_TOKEN` | Slack APIトークン (`download_file` で使用。`files:read` スコープが必要) |
+| `USERS_JSON_PATH` | ユーザーID→表示名マッピングのJSONファイルパス (省略時はIDをそのまま表示) |
 | `PORT` | サーバーポート (デフォルト: 29112) |
 
 ### ローカル開発

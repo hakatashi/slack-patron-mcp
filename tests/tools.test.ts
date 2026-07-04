@@ -7,6 +7,8 @@ import { registerGetChannelMessagesRaw } from "../src/tools/get_channel_messages
 import { registerGetThreadReplies } from "../src/tools/get_thread_replies";
 import { registerGetThreadRepliesRaw } from "../src/tools/get_thread_replies_raw";
 import { registerPostMessage } from "../src/tools/post_message";
+import { registerSearchMessages } from "../src/tools/search_messages";
+import { registerDownloadFile } from "../src/tools/download_file";
 import { _resetUsersCache } from "../src/users";
 
 const mockFetch = global.fetch as jest.MockedFunction<typeof fetch>;
@@ -26,6 +28,8 @@ async function createTestClient(token: string, slackToken = "slack-tok"): Promis
   registerGetThreadReplies(server, token);
   registerGetThreadRepliesRaw(server, token);
   registerPostMessage(server, slackToken);
+  registerSearchMessages(server, token);
+  registerDownloadFile(server, slackToken);
 
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
@@ -171,6 +175,68 @@ describe("get_channel_messages", () => {
     expect(text).toContain("500");
     expect(text).not.toContain("at ");  // no stack trace lines
   });
+
+  it("appends an image attachment note to the message line", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        messages: [
+          {
+            ts: "1700000000.000000",
+            user: "U001",
+            text: "look at this",
+            files: [
+              { id: "F01234567", mimetype: "image/jpeg", url_private: "https://example.com/example.jpg" },
+              { id: "F09876543", mimetype: "image/png", url_private: "https://example.com/example2.png" },
+            ],
+          },
+        ],
+        has_more: false,
+      }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "get_channel_messages",
+      arguments: { channel: "C001" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain(
+      "[添付画像あり(2件): https://example.com/example.jpg / fileId:F01234567, https://example.com/example2.png / fileId:F09876543]"
+    );
+  });
+
+  it("appends a generic attachment note for non-image files", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        messages: [
+          {
+            ts: "1700000000.000000",
+            user: "U001",
+            text: "see attached",
+            files: [{ id: "F01234567", mimetype: "application/pdf", url_private: "https://example.com/doc.pdf" }],
+          },
+        ],
+        has_more: false,
+      }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "get_channel_messages",
+      arguments: { channel: "C001" },
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("[添付ファイルあり(1件): https://example.com/doc.pdf / fileId:F01234567]");
+  });
 });
 
 describe("get_thread_replies", () => {
@@ -217,6 +283,34 @@ describe("get_thread_replies", () => {
     const text = (result as any).content[0].text as string;
     expect(text).toContain("403");
     expect(text).not.toContain("secret-upstream-token");
+  });
+
+  it("appends an attachment note to thread reply lines", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        messages: [
+          {
+            ts: "1700000000.000000",
+            user: "U001",
+            text: "Parent message",
+            files: [{ id: "F01234567", mimetype: "image/jpeg", url_private: "https://example.com/example.jpg" }],
+          },
+        ],
+        has_more: false,
+      }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "get_thread_replies",
+      arguments: { channel: "C001", thread_ts: "1700000000.000000" },
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("[添付画像あり(1件): https://example.com/example.jpg / fileId:F01234567]");
   });
 });
 
@@ -486,5 +580,301 @@ describe("get_thread_replies_raw", () => {
     const text = (result as any).content[0].text as string;
     expect(text).toContain("403");
     expect(text).not.toContain("secret-token");
+  });
+});
+
+describe("search_messages", () => {
+  it("formats search results with channel and author", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        messages: {
+          matches: [
+            {
+              ts: "1700000100.000000",
+              user: "U001",
+              text: "Hello world",
+              channel: { id: "C001", name: "general" },
+            },
+            {
+              ts: "1700000200.000000",
+              username: "bot-name",
+              text: "Bot message",
+              channel: { id: "C002", name: "random" },
+            },
+          ],
+          pagination: { next_cursor: "" },
+        },
+      }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "search_messages",
+      arguments: { query: "Hello", limit: 20 },
+    });
+
+    expect(result.isError).toBeFalsy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("#general (C001)");
+    expect(text).toContain("<U001>: Hello world");
+    expect(text).toContain("#random (C002)");
+    expect(text).toContain("<bot-name>: Bot message");
+  });
+
+  it("includes pagination cursor when present", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        messages: {
+          matches: [
+            { ts: "1700000000.000000", user: "U001", text: "msg", channel: { id: "C001", name: "general" } },
+          ],
+          pagination: { next_cursor: "next-page-cursor" },
+        },
+      }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "search_messages",
+      arguments: { query: "msg", limit: 1 },
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain('cursor="next-page-cursor"');
+  });
+
+  it("sends query and limit to upstream", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, messages: { matches: [], pagination: {} } }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    await client.callTool({
+      name: "search_messages",
+      arguments: { query: "プログラム AND (channel:C7AAX50QY)", limit: 5 },
+    });
+
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/search.messages");
+    const params = new URLSearchParams(init.body as string);
+    expect(params.get("query")).toBe("プログラム AND (channel:C7AAX50QY)");
+    expect(params.get("limit")).toBe("5");
+  });
+
+  it("returns empty message when no matches found", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, messages: { matches: [], pagination: {} } }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "search_messages",
+      arguments: { query: "nonexistent" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("No messages found");
+  });
+
+  it("returns error on upstream failure without exposing token", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500 } as Response);
+
+    const client = await createTestClient("secret-upstream-token");
+    const result = await client.callTool({
+      name: "search_messages",
+      arguments: { query: "test" },
+    });
+
+    expect(result.isError).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("500");
+    expect(text).not.toContain("secret-upstream-token");
+  });
+
+  it("returns error when ok=false in response", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: false, error: "invalid_query" }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "search_messages",
+      arguments: { query: "bad syntax (((" },
+    });
+
+    expect(result.isError).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("invalid_query");
+  });
+});
+
+describe("download_file", () => {
+  it("returns text content for text files", async () => {
+    // First call: files.info
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        file: {
+          id: "F001",
+          name: "hello.txt",
+          title: "Hello File",
+          mimetype: "text/plain",
+          filetype: "text",
+          size: 11,
+          url_private_download: "https://files.slack.com/files-pri/T001-F001/hello.txt",
+          permalink: "https://myworkspace.slack.com/files/U001/F001/hello.txt",
+        },
+      }),
+    } as unknown as Response);
+    // Second call: file download
+    const encoder = new TextEncoder();
+    const bodyBytes = encoder.encode("hello world");
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      headers: { get: (h: string) => (h === "content-type" ? "text/plain; charset=utf-8" : null) },
+      arrayBuffer: async () => bodyBytes.buffer,
+    } as unknown as Response);
+
+    const client = await createTestClient("tok", "xoxp-slack");
+    const result = await client.callTool({
+      name: "download_file",
+      arguments: { file_id: "F001" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("hello.txt");
+    expect(text).toContain("text/plain");
+    expect(text).toContain("hello world");
+  });
+
+  it("returns base64 content for binary files", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        file: {
+          id: "F002",
+          name: "image.png",
+          title: "Image",
+          mimetype: "image/png",
+          filetype: "png",
+          size: 4,
+          url_private_download: "https://files.slack.com/files-pri/T001-F002/image.png",
+          permalink: "https://myworkspace.slack.com/files/U001/F002/image.png",
+        },
+      }),
+    } as unknown as Response);
+    const binaryData = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      headers: { get: (h: string) => (h === "content-type" ? "image/png" : null) },
+      arrayBuffer: async () => binaryData.buffer,
+    } as unknown as Response);
+
+    const client = await createTestClient("tok", "xoxp-slack");
+    const result = await client.callTool({
+      name: "download_file",
+      arguments: { file_id: "F002" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("image.png");
+    expect(text).toContain("base64");
+    expect(text).toContain(Buffer.from(binaryData).toString("base64"));
+  });
+
+  it("returns only metadata for files exceeding 5 MB", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        file: {
+          id: "F003",
+          name: "large.zip",
+          title: "Large File",
+          mimetype: "application/zip",
+          filetype: "zip",
+          size: 10 * 1024 * 1024,
+          url_private_download: "https://files.slack.com/files-pri/T001-F003/large.zip",
+          permalink: "https://myworkspace.slack.com/files/U001/F003/large.zip",
+        },
+      }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok", "xoxp-slack");
+    const result = await client.callTool({
+      name: "download_file",
+      arguments: { file_id: "F003" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("large.zip");
+    expect(text).toContain("too large");
+    expect(mockFetch).toHaveBeenCalledTimes(1); // no download call made
+  });
+
+  it("returns error when files.info returns ok=false", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: false, error: "file_not_found" }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok", "xoxp-slack");
+    const result = await client.callTool({
+      name: "download_file",
+      arguments: { file_id: "FBAD" },
+    });
+
+    expect(result.isError).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("file_not_found");
+  });
+
+  it("returns error on HTTP failure without exposing token", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 403 } as Response);
+
+    const client = await createTestClient("tok", "xoxp-super-secret");
+    const result = await client.callTool({
+      name: "download_file",
+      arguments: { file_id: "F001" },
+    });
+
+    expect(result.isError).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("403");
+    expect(text).not.toContain("xoxp-super-secret");
+  });
+
+  it("uses the Slack token (not upstream token) for files.info", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 200, json: async () => ({ ok: false, error: "err" }) } as unknown as Response);
+
+    const client = await createTestClient("upstream-tok", "xoxp-slack-tok");
+    await client.callTool({ name: "download_file", arguments: { file_id: "F001" } });
+
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("files.info");
+    expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer xoxp-slack-tok");
   });
 });
