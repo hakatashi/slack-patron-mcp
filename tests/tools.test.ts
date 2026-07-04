@@ -175,6 +175,68 @@ describe("get_channel_messages", () => {
     expect(text).toContain("500");
     expect(text).not.toContain("at ");  // no stack trace lines
   });
+
+  it("appends an image attachment note to the message line", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        messages: [
+          {
+            ts: "1700000000.000000",
+            user: "U001",
+            text: "look at this",
+            files: [
+              { id: "F01234567", mimetype: "image/jpeg", url_private: "https://example.com/example.jpg" },
+              { id: "F09876543", mimetype: "image/png", url_private: "https://example.com/example2.png" },
+            ],
+          },
+        ],
+        has_more: false,
+      }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "get_channel_messages",
+      arguments: { channel: "C001" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain(
+      "[添付画像あり(2件): https://example.com/example.jpg / fileId:F01234567, https://example.com/example2.png / fileId:F09876543]"
+    );
+  });
+
+  it("appends a generic attachment note for non-image files", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        messages: [
+          {
+            ts: "1700000000.000000",
+            user: "U001",
+            text: "see attached",
+            files: [{ id: "F01234567", mimetype: "application/pdf", url_private: "https://example.com/doc.pdf" }],
+          },
+        ],
+        has_more: false,
+      }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "get_channel_messages",
+      arguments: { channel: "C001" },
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("[添付ファイルあり(1件): https://example.com/doc.pdf / fileId:F01234567]");
+  });
 });
 
 describe("get_thread_replies", () => {
@@ -221,6 +283,34 @@ describe("get_thread_replies", () => {
     const text = (result as any).content[0].text as string;
     expect(text).toContain("403");
     expect(text).not.toContain("secret-upstream-token");
+  });
+
+  it("appends an attachment note to thread reply lines", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        messages: [
+          {
+            ts: "1700000000.000000",
+            user: "U001",
+            text: "Parent message",
+            files: [{ id: "F01234567", mimetype: "image/jpeg", url_private: "https://example.com/example.jpg" }],
+          },
+        ],
+        has_more: false,
+      }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "get_thread_replies",
+      arguments: { channel: "C001", thread_ts: "1700000000.000000" },
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("[添付画像あり(1件): https://example.com/example.jpg / fileId:F01234567]");
   });
 });
 

@@ -13,9 +13,9 @@ slack-patron (https://github.com/tsg-ut/slack-patron) のSlackメッセージ履
 | ツール名 | 説明 |
 |---------|------|
 | `list_channels` | ワークスペースの全チャンネル一覧を取得 |
-| `get_channel_messages` | チャンネルのメッセージ履歴を取得 (時刻範囲・ページネーション対応) |
+| `get_channel_messages` | チャンネルのメッセージ履歴を取得 (時刻範囲・ページネーション対応、添付ファイルは末尾に注記) |
 | `get_channel_messages_raw` | チャンネルのメッセージ履歴を生JSON形式で取得 |
-| `get_thread_replies` | スレッドの返信一覧を取得 |
+| `get_thread_replies` | スレッドの返信一覧を取得 (添付ファイルは末尾に注記) |
 | `get_thread_replies_raw` | スレッドの返信一覧を生JSON形式で取得 |
 | `search_messages` | ElasticSearchクエリ文字列構文でメッセージを検索 |
 | `download_file` | SlackにアップロードされたファイルをダウンロードしてコンテンツをSlack API経由で取得 |
@@ -38,6 +38,12 @@ slack-patron (https://github.com/tsg-ut/slack-patron) のSlackメッセージ履
 | `thread_ts` | string | ✓ | 親メッセージのタイムスタンプ |
 | `limit` | number | - | 取得件数 (1-200, デフォルト50) |
 | `cursor` | string | - | ページネーションカーソル |
+
+`get_channel_messages` / `get_thread_replies` は、メッセージに添付ファイルがある場合、行の末尾に注記を追加します。全ファイルが画像の場合は `添付画像あり`、それ以外を含む場合は `添付ファイルあり` と表示されます。
+
+```
+[2023-11-14T22:13:20.000Z] <U001>: look at this [添付画像あり(2件): https://example.com/example.jpg / fileId:F01234567, https://example.com/example2.png / fileId:F09876543]
+```
 
 ### `search_messages` パラメータ
 

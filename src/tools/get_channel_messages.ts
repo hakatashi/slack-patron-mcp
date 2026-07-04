@@ -8,6 +8,12 @@ interface ChannelEntry {
   name: string;
 }
 
+interface SlackFile {
+  id: string;
+  mimetype?: string;
+  url_private?: string;
+}
+
 interface SlackMessage {
   ts: string;
   user?: string;
@@ -16,6 +22,15 @@ interface SlackMessage {
   text?: string;
   thread_ts?: string;
   reply_count?: number;
+  files?: SlackFile[];
+}
+
+function formatAttachmentNote(files?: SlackFile[]): string {
+  if (!files || files.length === 0) return "";
+  const allImages = files.every((f) => (f.mimetype ?? "").startsWith("image/"));
+  const label = allImages ? "添付画像あり" : "添付ファイルあり";
+  const parts = files.map((f) => `${f.url_private ?? "(URL不明)"} / fileId:${f.id}`);
+  return ` [${label}(${files.length}件): ${parts.join(", ")}]`;
 }
 
 const CHANNEL_ID_PATTERN = /^[CDGW][A-Z0-9]+$/;
@@ -54,7 +69,8 @@ export function registerGetChannelMessages(server: McpServer, token: string): vo
     "get_channel_messages",
     {
       description:
-        "Retrieve messages from a Slack channel. Returns formatted message history with author, content, and timestamp. Messages are returned newest-first.",
+        "Retrieve messages from a Slack channel. Returns formatted message history with author, content, and timestamp. Messages are returned newest-first. " +
+        "If a message has attachments, a note is appended to the end of the line (e.g. [添付画像あり(2件): https://.../a.jpg / fileId:F01234567, ...]).",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       inputSchema: inputSchema as any,
     },
@@ -95,7 +111,8 @@ export function registerGetChannelMessages(server: McpServer, token: string): vo
             m.reply_count && m.reply_count > 0
               ? ` [${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"} — use get_thread_replies with channel=${channelId} thread_ts=${m.ts}]`
               : "";
-          return `[${ts}] <${author}>${threadNote}: ${text}`;
+          const attachmentNote = formatAttachmentNote(m.files);
+          return `[${ts}] <${author}>${threadNote}: ${text}${attachmentNote}`;
         });
 
         if (nextCursor) {
