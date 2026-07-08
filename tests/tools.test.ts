@@ -2,6 +2,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerListChannels } from "../src/tools/list_channels";
+import { registerListUsers } from "../src/tools/list_users";
+import { registerGetUserInfo } from "../src/tools/get_user_info";
 import { registerGetChannelMessages } from "../src/tools/get_channel_messages";
 import { registerGetChannelMessagesRaw } from "../src/tools/get_channel_messages_raw";
 import { registerGetThreadReplies } from "../src/tools/get_thread_replies";
@@ -23,6 +25,8 @@ beforeEach(() => {
 async function createTestClient(token: string, slackToken = "slack-tok"): Promise<Client> {
   const server = new McpServer({ name: "test", version: "0.0.1" });
   registerListChannels(server, token);
+  registerListUsers(server, token);
+  registerGetUserInfo(server, token);
   registerGetChannelMessages(server, token);
   registerGetChannelMessagesRaw(server, token);
   registerGetThreadReplies(server, token);
@@ -82,6 +86,114 @@ describe("list_channels", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const text = (result as any).content[0].text as string;
     expect(text).not.toContain("my-token");
+  });
+});
+
+describe("list_users", () => {
+  it("formats user list correctly", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        U001: { id: "U001", name: "taro", real_name: "Taro Yamada", profile: { display_name: "taro.y" } },
+        U002: { id: "U002", name: "bot", real_name: "Some Bot", is_bot: true },
+        U003: { id: "U003", name: "hanako", real_name: "Hanako Suzuki", deleted: true },
+      }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({ name: "list_users", arguments: {} });
+
+    expect(result.isError).toBeFalsy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("@taro (U001): taro.y");
+    expect(text).toContain("@bot (U002): Some Bot [bot]");
+    expect(text).toContain("@hanako (U003): Hanako Suzuki [deactivated]");
+  });
+
+  it("returns error message on upstream 403 without exposing token", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 403 } as Response);
+
+    const client = await createTestClient("super-secret");
+    const result = await client.callTool({ name: "list_users", arguments: {} });
+
+    expect(result.isError).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("403");
+    expect(text).not.toContain("super-secret");
+  });
+});
+
+describe("get_user_info", () => {
+  const USERS_RESPONSE = {
+    U001: {
+      id: "U001",
+      name: "taro",
+      real_name: "Taro Yamada",
+      tz: "Asia/Tokyo",
+      profile: { display_name: "taro.y", title: "Engineer", email: "taro@example.com" },
+    },
+  };
+
+  it("finds a user by ID", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => USERS_RESPONSE,
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({ name: "get_user_info", arguments: { user: "U001" } });
+
+    expect(result.isError).toBeFalsy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("ID: U001");
+    expect(text).toContain("Display name: taro.y");
+    expect(text).toContain("Email: taro@example.com");
+  });
+
+  it("finds a user by username", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => USERS_RESPONSE,
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({ name: "get_user_info", arguments: { user: "@taro" } });
+
+    expect(result.isError).toBeFalsy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("ID: U001");
+  });
+
+  it("returns an error when the user is not found", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => USERS_RESPONSE,
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({ name: "get_user_info", arguments: { user: "nonexistent" } });
+
+    expect(result.isError).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("not found");
+  });
+
+  it("returns error message on upstream 500 without exposing token", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500 } as Response);
+
+    const client = await createTestClient("super-secret");
+    const result = await client.callTool({ name: "get_user_info", arguments: { user: "U001" } });
+
+    expect(result.isError).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain("500");
+    expect(text).not.toContain("super-secret");
   });
 });
 

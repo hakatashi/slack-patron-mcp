@@ -26,6 +26,7 @@ src/
 ## Key Invariants
 
 - **Stateless MCP**: A new `McpServer` + `StreamableHTTPServerTransport` instance is created per request. No session state is maintained.
+- **OAuth 2.1 (with PKCE)**: Supports Claude.ai custom connector authentication. Employs user-delegated authorization screen validating against `MCP_SERVER_AUTH_TOKEN` as password, and issues JWT access tokens (valid for 1 year). Supports `/` (base path) and `/mcp` endpoints for both GET (SSE) and POST.
 - **Read-only**: No write endpoints are implemented. Never add them without explicit approval.
 - **No secrets in output**: Tokens and stack traces must never appear in tool responses or logs. Always catch errors and return friendly messages with only the HTTP status code.
 - **Always limit upstream calls**: Every call to the upstream API must include a `limit` parameter. Never fetch unbounded data.

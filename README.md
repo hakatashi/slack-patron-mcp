@@ -5,7 +5,7 @@ slack-patron (https://github.com/tsg-ut/slack-patron) のSlackメッセージ履
 ## 概要
 
 - **トランスポート**: Streamable HTTP (stateless)
-- **認証**: Bearer token (MCP_SERVER_AUTH_TOKEN)
+- **認証**: Bearer token (MCP_SERVER_AUTH_TOKEN)、および **OAuth 2.1 (with PKCE)**（Claude.ai カスタムコネクタ接続用）
 - **上流API**: `SLACK_PATRON_BASE_URL` 環境変数で設定
 
 ## 利用可能なツール
@@ -13,12 +13,20 @@ slack-patron (https://github.com/tsg-ut/slack-patron) のSlackメッセージ履
 | ツール名 | 説明 |
 |---------|------|
 | `list_channels` | ワークスペースの全チャンネル一覧を取得 |
+| `list_users` | ワークスペースの全ユーザー一覧を取得 |
+| `get_user_info` | 特定ユーザーの詳細情報を取得 (ID またはユーザー名/表示名で検索) |
 | `get_channel_messages` | チャンネルのメッセージ履歴を取得 (時刻範囲・ページネーション対応、添付ファイルは末尾に注記) |
 | `get_channel_messages_raw` | チャンネルのメッセージ履歴を生JSON形式で取得 |
 | `get_thread_replies` | スレッドの返信一覧を取得 (添付ファイルは末尾に注記) |
 | `get_thread_replies_raw` | スレッドの返信一覧を生JSON形式で取得 |
 | `search_messages` | ElasticSearchクエリ文字列構文でメッセージを検索 |
 | `download_file` | SlackにアップロードされたファイルをダウンロードしてコンテンツをSlack API経由で取得 |
+
+### `get_user_info` パラメータ
+
+| パラメータ | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `user` | string | ✓ | Slack ユーザーID (例: U01234567) またはユーザー名/表示名 (例: taro, @taro) |
 
 ### `get_channel_messages` パラメータ
 
@@ -108,18 +116,31 @@ sudo ln -s /etc/nginx/sites-available/your-vhost-config \
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-## Claude カスタムコネクタ登録方法
+## Claude.ai / Claude Code コネクタ登録方法
 
-Claude.ai または Claude Code で以下のように設定する:
+### 1. Claude.ai (Web UI) で登録する場合 (OAuth 2.1)
+Claude.ai (Enterprise または Pro) のカスタムコネクタとして登録する手順は以下の通りです。
 
-1. MCP サーバーの設定を開く
-2. 「カスタムコネクタを追加」を選択
-3. 以下を入力:
-   - **URL**: `https://your-server.example.com/mcp`
-   - **認証タイプ**: Bearer Token
-   - **トークン**: `.env` の `MCP_SERVER_AUTH_TOKEN` の値
+#### 1-1. コネクタの追加
+1. Claude.ai の管理画面（「Organization Settings」 > 「Connectors」等）で、**「Add custom connector」** を選択します。
+2. サーバーのベースURL（例: `https://your-server.example.com`）を入力します。
+   - ※ Claude.ai からアクセスできるよう、公開URLであり HTTPS で保護されている必要があります。
+3. 認証方法（Authentication）として **「OAuth 2.0」** を選択します。
 
-Claude Code の場合 (`~/.claude/settings.json`):
+#### 1-2. クライアント情報の設定
+1. **Client ID** / **Client Secret**: 任意のダミーの文字列を入力します（例: Client IDに `claude-client` など）。
+   - ※ 本サーバーはシングルユーザー向けであるため、厳格な Client ID 制限は行わず、PKCE検証と設定されたパスワードによる認証のみで動作します。
+2. メタデータの自動検出により、サーバーから提供される各種認証・トークンエンドポイント (`/.well-known/oauth-authorization-server` など) が自動的に適用されます。
+
+#### 1-3. 同意画面での認可
+1. コネクタを有効化する際、Claude から本サーバーの認可画面（`/oauth/authorize`）にリダイレクトされます。
+2. パスワード入力欄が表示されるため、サーバーの環境変数 `MCP_SERVER_AUTH_TOKEN` に設定されている **Bearer Token (パスワード)** を入力し、**「アクセスを認可する」** ボタンをクリックします。
+3. 認証に成功すると、自動的に Claude 側にリダイレクトされ、接続が完了します。以降、1年間有効な JWT アクセストークンが Claude に払い出され、本サーバーへの通信が認証されます。
+
+### 2. Claude Code で登録する場合 (固定Bearerトークン)
+Claude Code などの CLI ツールでは、ヘッダーに直接固定トークンを設定して接続できます。
+`~/.claude/settings.json` に以下のように設定してください。
+
 ```json
 {
   "mcpServers": {
