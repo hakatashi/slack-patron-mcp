@@ -90,12 +90,22 @@ describe("POST /mcp — auth middleware", () => {
   });
 });
 
-describe("GET /mcp", () => {
-  it("returns 405 Method Not Allowed", async () => {
+// GET /mcp is the SSE stream endpoint, so it goes through the same auth middleware as POST.
+// A successful GET holds the connection open, so only the rejection path is asserted here.
+describe("GET /mcp — SSE endpoint", () => {
+  it("returns 401 with no Authorization header", async () => {
     process.env.MCP_SERVER_AUTH_TOKEN = "test-secret";
     const app = createApp();
     const res = await request(app).get("/mcp");
-    expect(res.status).toBe(405);
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("Unauthorized");
+  });
+
+  it("returns 401 with wrong token", async () => {
+    process.env.MCP_SERVER_AUTH_TOKEN = "test-secret";
+    const app = createApp();
+    const res = await request(app).get("/mcp").set("Authorization", "Bearer wrong-token");
+    expect(res.status).toBe(401);
   });
 });
 
