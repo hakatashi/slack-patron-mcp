@@ -250,6 +250,79 @@ describe("get_channel_messages", () => {
     expect(postCall[1].body as string).toContain("channel=C001");
   });
 
+  it("lists messages oldest-first by default", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        // Upstream returns newest-first
+        messages: [
+          { ts: "1700000200.000000", user: "U001", text: "third" },
+          { ts: "1700000100.000000", user: "U001", text: "second" },
+          { ts: "1700000000.000000", user: "U001", text: "first" },
+        ],
+        has_more: false,
+      }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "get_channel_messages",
+      arguments: { channel: "C001" },
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text.split("\n").map((l) => l.split(": ")[1])).toEqual(["first", "second", "third"]);
+  });
+
+  it("keeps upstream newest-first order when order=desc", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        messages: [
+          { ts: "1700000200.000000", user: "U001", text: "third" },
+          { ts: "1700000100.000000", user: "U001", text: "second" },
+          { ts: "1700000000.000000", user: "U001", text: "first" },
+        ],
+        has_more: false,
+      }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "get_channel_messages",
+      arguments: { channel: "C001", order: "desc" },
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text.split("\n").map((l) => l.split(": ")[1])).toEqual(["third", "second", "first"]);
+  });
+
+  it("places the cursor hint above the messages in ascending order", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        messages: [{ ts: "1700000000.000000", user: "U001", text: "msg" }],
+        has_more: true,
+        response_metadata: { next_cursor: "cursor-abc" },
+      }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "get_channel_messages",
+      arguments: { channel: "C001", limit: 1 },
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text.indexOf("Older messages available")).toBeLessThan(text.indexOf("msg"));
+  });
+
   it("includes pagination cursor hint when has more messages", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,

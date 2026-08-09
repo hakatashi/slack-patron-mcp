@@ -47,7 +47,14 @@ const inputSchema = z.object({
     "End Unix timestamp with microseconds (e.g. 1700000000.000000). Only messages before this time are returned."
   ),
   cursor: z.string().optional().describe(
-    "Pagination cursor from a previous response to get the next page."
+    "Pagination cursor from a previous response to fetch the preceding (older) page."
+  ),
+  order: z.enum(["asc", "desc"]).optional().describe(
+    'Display order of the returned messages. "asc" (default) lists oldest first so the ' +
+      'conversation reads top to bottom in chronological order. "desc" lists newest first. ' +
+      "Note that this only affects the display order within a page; regardless of this setting, " +
+      "the messages fetched are always the latest ones in the requested range, and the pagination " +
+      "cursor always moves further back in time."
   ),
 });
 
@@ -69,7 +76,9 @@ export function registerGetChannelMessages(server: McpServer, token: string): vo
     "get_channel_messages",
     {
       description:
-        "Retrieve messages from a Slack channel. Returns formatted message history with author, content, and timestamp. Messages are returned newest-first. " +
+        "Retrieve messages from a Slack channel. Returns formatted message history with author, content, and timestamp. " +
+        "Messages are listed oldest-first by default (chronological order), so the conversation reads top to bottom; pass order=\"desc\" for newest-first. " +
+        "The messages fetched are always the latest ones in the requested range, and the pagination cursor moves further back in time. " +
         "If a message has attachments, a note is appended to the end of the line (e.g. [添付画像あり(2件): https://.../a.jpg / fileId:F01234567, ...]).",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       inputSchema: inputSchema as any,
@@ -77,6 +86,7 @@ export function registerGetChannelMessages(server: McpServer, token: string): vo
     async (args: z.infer<typeof inputSchema>) => {
       const { channel, oldest, latest, cursor } = args;
       const limit = Math.min(Math.max(Math.floor(args.limit ?? 50), 1), 200);
+      const order = args.order ?? "asc";
       try {
         const channelId = await resolveChannelId(channel, token);
         const body: Record<string, string> = {
@@ -94,7 +104,9 @@ export function registerGetChannelMessages(server: McpServer, token: string): vo
           response_metadata?: { next_cursor?: string };
         };
 
-        const messages = data.messages ?? [];
+        // Upstream returns messages newest-first; flip to chronological order unless asked otherwise.
+        const fetched = data.messages ?? [];
+        const messages = order === "asc" ? [...fetched].reverse() : fetched;
         const nextCursor = data.response_metadata?.next_cursor;
 
         if (messages.length === 0) {
@@ -116,7 +128,14 @@ export function registerGetChannelMessages(server: McpServer, token: string): vo
         });
 
         if (nextCursor) {
-          lines.push(`\n(More messages available. Use cursor="${nextCursor}" to get the next page.)`);
+          // The cursor always walks backwards in time, so in ascending order the next page
+          // belongs above these lines rather than below them.
+          const hint = `(Older messages available. Use cursor="${nextCursor}" to fetch the preceding (older) page.)`;
+          if (order === "asc") {
+            lines.unshift(`${hint}\n`);
+          } else {
+            lines.push(`\n${hint}`);
+          }
         }
 
         return { content: [{ type: "text" as const, text: lines.join("\n") }] };

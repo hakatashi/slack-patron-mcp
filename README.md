@@ -15,7 +15,7 @@ slack-patron (https://github.com/tsg-ut/slack-patron) のSlackメッセージ履
 | `list_channels` | ワークスペースの全チャンネル一覧を取得 |
 | `list_users` | ワークスペースの全ユーザー一覧を取得 |
 | `get_user_info` | 特定ユーザーの詳細情報を取得 (ID またはユーザー名/表示名で検索) |
-| `get_channel_messages` | チャンネルのメッセージ履歴を取得 (時刻範囲・ページネーション対応、添付ファイルは末尾に注記) |
+| `get_channel_messages` | チャンネルのメッセージ履歴を取得 (時系列順、時刻範囲・ページネーション対応、添付ファイルは末尾に注記) |
 | `get_channel_messages_raw` | チャンネルのメッセージ履歴を生JSON形式で取得 |
 | `get_thread_replies` | スレッドの返信一覧を取得 (添付ファイルは末尾に注記) |
 | `get_thread_replies_raw` | スレッドの返信一覧を生JSON形式で取得 |
@@ -37,6 +37,9 @@ slack-patron (https://github.com/tsg-ut/slack-patron) のSlackメッセージ履
 | `oldest` | string | - | 開始タイムスタンプ (例: 1700000000.000000) |
 | `latest` | string | - | 終了タイムスタンプ |
 | `cursor` | string | - | ページネーションカーソル (前回レスポンスから取得) |
+| `order` | `"asc"` \| `"desc"` | - | 表示順。`asc` (デフォルト) は古い順、`desc` は新しい順 |
+
+`order` はページ内の**表示順**のみを変更します。取得されるのは常に指定範囲の最新側から `limit` 件であり、`cursor` は常により古い方向へ進みます。そのため `order: "asc"` の場合、カーソルの案内文はメッセージ一覧の**先頭**に出力されます。
 
 ### `get_thread_replies` パラメータ
 
