@@ -5,10 +5,29 @@ import { slackPost, UpstreamError } from "../upstream.js";
 const SANDBOX_CHANNEL_ID = "C7AAX50QY";
 
 // Slack interprets unescaped `<...>` sequences as markup (e.g. `<!channel>`,
-// `<@UXXXXXXXX>`, `<#CXXXXXXXX>`, links). Escaping &, <, > per Slack's own
-// recommendation neutralizes any such sequence into literal, non-triggering text.
-function escapeSlackText(text: string): string {
+// `<@UXXXXXXXX>`, `<#CXXXXXXXX>`, links). We allow only Slack's link syntax
+// (`<https://...>` or `<https://...|label>`) through verbatim; everything
+// else is escaped per Slack's own recommendation (&, <, > -> entities) so no
+// other markup (mentions, channel refs, special mentions) can be triggered.
+// The label/url character classes exclude `<`/`>`, so markup cannot be
+// smuggled in through a fake label either.
+const SLACK_LINK_PATTERN = /<(https?:\/\/[^\s<>|]+)(\|[^<>]*)?>/g;
+
+function escapePlainText(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function sanitizeSlackText(text: string): string {
+  let result = "";
+  let lastIndex = 0;
+  for (const match of text.matchAll(SLACK_LINK_PATTERN)) {
+    const start = match.index ?? 0;
+    result += escapePlainText(text.slice(lastIndex, start));
+    result += match[0];
+    lastIndex = start + match[0].length;
+  }
+  result += escapePlainText(text.slice(lastIndex));
+  return result;
 }
 
 function buildBlocks(message: string): string {
@@ -33,14 +52,14 @@ export function registerPostMessage(server: McpServer, token: string): void {
     {
       description:
         "Post a message to the #sandbox Slack channel. The message will be sent as the authenticated user. An attribution suffix is automatically appended. " +
-        "Special Slack markup characters (&, <, >) are escaped before sending, so mentions such as <!channel>, <!here>, <@USER_ID>, or <#CHANNEL_ID> " +
-        "are always posted as literal text and never trigger notifications.",
+        "Only Slack's link syntax (<https://example.com> or <https://example.com|label>) is passed through as markup; everything else is escaped, " +
+        "so mentions such as <!channel>, <!here>, <@USER_ID>, or <#CHANNEL_ID> are always posted as literal text and never trigger notifications.",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       inputSchema: inputSchema as any,
     },
     async (args: z.infer<typeof inputSchema>) => {
       try {
-        const safeMessage = escapeSlackText(args.message);
+        const safeMessage = sanitizeSlackText(args.message);
         const data = (await slackPost("chat.postMessage", token, {
           channel: SANDBOX_CHANNEL_ID,
           text: safeMessage,

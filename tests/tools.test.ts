@@ -653,6 +653,45 @@ describe("post_message", () => {
       "hey &lt;!channel&gt; and &lt;@U01234567&gt; check &lt;#C01234567|general&gt;"
     );
   });
+
+  it("passes through Slack link syntax while escaping everything else", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, ts: "1700000006.000000" }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok", "xoxp-secret");
+    await client.callTool({
+      name: "post_message",
+      arguments: {
+        message:
+          "see <https://example.com/docs> and <https://example.com|label> but not <@U01234567> or 1 < 2",
+      },
+    });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const params = new URLSearchParams(init.body as string);
+    expect(params.get("text")).toBe(
+      "see <https://example.com/docs> and <https://example.com|label> but not &lt;@U01234567&gt; or 1 &lt; 2"
+    );
+  });
+
+  it("does not let a fake label smuggle markup through the link syntax", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, ts: "1700000007.000000" }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok", "xoxp-secret");
+    await client.callTool({
+      name: "post_message",
+      arguments: { message: "<https://example.com|<!channel>>" },
+    });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const params = new URLSearchParams(init.body as string);
+    expect(params.get("text")).not.toContain("<!channel>");
+  });
 });
 
 describe("nickname resolution in get_channel_messages", () => {
