@@ -221,8 +221,38 @@ describe("get_channel_messages", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const text = (result as any).content[0].text as string;
     expect(text).toContain("<U001>: Hello world");
-    expect(text).toContain("3 replies");
-    expect(text).toContain("thread_ts=1700000000.000000");
+    expect(text).toContain("[スレッドに返信があります / ts:1700000000.000000]");
+  });
+
+  it("adds a broadcasted-reply thread note when thread_ts differs from the message's own ts", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        messages: [
+          {
+            ts: "1700000300.000000",
+            user: "U003",
+            text: "broadcasted reply",
+            thread_ts: "1700000000.000000",
+          },
+        ],
+        has_more: false,
+      }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok");
+    const result = await client.callTool({
+      name: "get_channel_messages",
+      arguments: { channel: "C001" },
+    });
+
+    expect(result.isError).toBeFalsy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = (result as any).content[0].text as string;
+    expect(text).toContain(
+      "[スレッドから公開されたメッセージです / thread_ts:1700000000.000000]"
+    );
   });
 
   it("resolves channel name to ID via channels.json", async () => {
@@ -599,6 +629,29 @@ describe("post_message", () => {
     const text = (result as any).content[0].text as string;
     expect(text).toContain("403");
     expect(text).not.toContain("xoxp-super-secret");
+  });
+
+  it("escapes Slack markup so mentions are not interpreted", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, ts: "1700000005.000000" }),
+    } as unknown as Response);
+
+    const client = await createTestClient("tok", "xoxp-secret");
+    await client.callTool({
+      name: "post_message",
+      arguments: { message: "hey <!channel> and <@U01234567> check <#C01234567|general>" },
+    });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    const params = new URLSearchParams(init.body as string);
+    expect(params.get("text")).toBe(
+      "hey &lt;!channel&gt; and &lt;@U01234567&gt; check &lt;#C01234567|general&gt;"
+    );
+    const blocks = JSON.parse(params.get("blocks") ?? "[]");
+    expect(blocks[0].text.text).toBe(
+      "hey &lt;!channel&gt; and &lt;@U01234567&gt; check &lt;#C01234567|general&gt;"
+    );
   });
 });
 

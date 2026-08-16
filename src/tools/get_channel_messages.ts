@@ -21,7 +21,6 @@ interface SlackMessage {
   bot_id?: string;
   text?: string;
   thread_ts?: string;
-  reply_count?: number;
   files?: SlackFile[];
 }
 
@@ -79,7 +78,10 @@ export function registerGetChannelMessages(server: McpServer, token: string): vo
         "Retrieve messages from a Slack channel. Returns formatted message history with author, content, and timestamp. " +
         "Messages are listed oldest-first by default (chronological order), so the conversation reads top to bottom; pass order=\"desc\" for newest-first. " +
         "The messages fetched are always the latest ones in the requested range, and the pagination cursor moves further back in time. " +
-        "If a message has attachments, a note is appended to the end of the line (e.g. [添付画像あり(2件): https://.../a.jpg / fileId:F01234567, ...]).",
+        "If a message has attachments, a note is appended to the end of the line (e.g. [添付画像あり(2件): https://.../a.jpg / fileId:F01234567, ...]). " +
+        "If a message has thread_ts set, a note is appended to the end of the line: " +
+        "[スレッドに返信があります / ts:...] when the message is the thread's parent (thread_ts equals its own ts; use ts with get_thread_replies), or " +
+        "[スレッドから公開されたメッセージです / thread_ts:...] when the message is a reply that was also broadcast to the channel (thread_ts points to the parent).",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       inputSchema: inputSchema as any,
     },
@@ -119,10 +121,11 @@ export function registerGetChannelMessages(server: McpServer, token: string): vo
           const ts = new Date(parseFloat(m.ts) * 1000).toISOString();
           const author = m.username ?? (m.user ? resolveUsername(m.user) : null) ?? m.bot_id ?? "unknown";
           const text = (m.text ?? "").replace(/\n/g, " ");
-          const threadNote =
-            m.reply_count && m.reply_count > 0
-              ? ` [${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"} — use get_thread_replies with channel=${channelId} thread_ts=${m.ts}]`
-              : "";
+          const threadNote = !m.thread_ts
+            ? ""
+            : m.thread_ts === m.ts
+              ? ` [スレッドに返信があります / ts:${m.ts}]`
+              : ` [スレッドから公開されたメッセージです / thread_ts:${m.thread_ts}]`;
           const attachmentNote = formatAttachmentNote(m.files);
           return `[${ts}] <${author}>${threadNote}: ${text}${attachmentNote}`;
         });

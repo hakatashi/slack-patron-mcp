@@ -21,6 +21,7 @@ slack-patron (https://github.com/tsg-ut/slack-patron) のSlackメッセージ履
 | `get_thread_replies_raw` | スレッドの返信一覧を生JSON形式で取得 |
 | `search_messages` | ElasticSearchクエリ文字列構文でメッセージを検索 |
 | `download_file` | SlackにアップロードされたファイルをダウンロードしてコンテンツをSlack API経由で取得 |
+| `post_message` | `#sandbox` チャンネルにメッセージを投稿 (メンション等のマークアップは無害化される) |
 
 ### `get_user_info` パラメータ
 
@@ -55,6 +56,24 @@ slack-patron (https://github.com/tsg-ut/slack-patron) のSlackメッセージ履
 ```
 [2023-11-14T22:13:20.000Z] <U001>: look at this [添付画像あり(2件): https://example.com/example.jpg / fileId:F01234567, https://example.com/example2.png / fileId:F09876543]
 ```
+
+`get_channel_messages` は、メッセージに `thread_ts` がセットされている場合、行の末尾に注記を追加します。
+
+- `thread_ts` が自身の `ts` と一致する場合 (スレッドの親メッセージ): `[スレッドに返信があります / ts:...]`
+- `thread_ts` が自身の `ts` と一致しない場合 (チャンネルにもブロードキャストされたスレッド返信): `[スレッドから公開されたメッセージです / thread_ts:...]`
+
+```
+[2023-11-14T22:13:20.000Z] <U001>: first message [スレッドに返信があります / ts:1700000000.000000]
+[2023-11-14T22:15:00.000Z] <U002>: broadcasted reply [スレッドから公開されたメッセージです / thread_ts:1700000000.000000]
+```
+
+### `post_message` パラメータ
+
+| パラメータ | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `message` | string | ✓ | 投稿するメッセージのテキスト |
+
+投稿前にメッセージ中の `&`、`<`、`>` はエスケープされます。これにより `<!channel>`、`<!here>`、`<@USER_ID>`、`<#CHANNEL_ID>` のようなSlackマークアップは、Slack側でメンションやチャンネル参照として解釈されず、そのままリテラルなテキストとして表示されます。
 
 ### `search_messages` パラメータ
 
